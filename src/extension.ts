@@ -17,7 +17,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const block = findCommentBlock(doc, pos.line);
 
-			if (block) {
+			if (!block) return;
+
+			if (block.type == BlockType.Stars) {
 				const text = doc.getText(block.range);
 
 				let newText: string;
@@ -30,12 +32,11 @@ export function activate(context: vscode.ExtensionContext) {
 				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 				return;
 			}
-
-			// fallback: check for // comment
-			const line = doc.lineAt(pos.line);
-			if (line.text.trim().startsWith('//')) {
-				const newText = fromSlashComment(line.text, width);
-				applyEditWithAst(editor, line.range, line.text, newText, editor.selection.active);
+			else if (block.type == BlockType.Slashes)
+			{
+				const text = doc.getText(block.range);
+				const newText = fromSlashComment(text, width);
+				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 			}
 		})
 	);
@@ -56,32 +57,67 @@ function getClangColumnLimit(): number | null {
 	return match ? parseInt(match[1], 10) : null;
 }
 
+enum BlockType {
+	Slashes,
+	Stars
+}
+
 function findCommentBlock(doc: vscode.TextDocument, line: number) {
 	let start = line;
 	let end = line;
+	let blockType: BlockType | null  = null;
 
 	// find /**
 	while (start >= 0) {
 		const text = doc.lineAt(start).text;
-		if (text.includes('/**')) break;
+		if (blockType == null && text.includes('/**')) {
+			blockType = BlockType.Stars; 
+			break;
+		}
+		if (blockType == null && text.includes('*/'))
+		{
+			break;
+		}
+		if (text.trimStart().startsWith('//'))
+		{
+			if (blockType == null) {
+				blockType = BlockType.Slashes;
+			}
+		}
+		else if (blockType == BlockType.Slashes)
+		{
+			break;
+		}
 		start--;
 	}
+	if (blockType == BlockType.Slashes) start++;
 
-	if (start < 0) return null;
+	if (blockType == null || start < 0) return null;
 
 	// find */
 	while (end < doc.lineCount) {
 		const text = doc.lineAt(end).text;
-		if (text.includes('*/')) break;
+	
+		if (blockType == BlockType.Slashes)
+		{
+			if (!text.trimStart().startsWith('//')) break;
+		}
+		else if (blockType == BlockType.Stars)
+		{
+			if (text.includes('*/')) break;
+		}
+
 		end++;
 	}
+	if (blockType == BlockType.Slashes) end--;
 
 	if (end >= doc.lineCount) return null;
 
 	const startLine = doc.lineAt(start).text;
 	return {
 		range: new vscode.Range(start, 0, end, doc.lineAt(end).text.length),
-		indent: getIndent(startLine)
+		indent: getIndent(startLine),
+		type: blockType
 	};
 }
 
@@ -126,9 +162,7 @@ function toMultiline(text: string, width: number, indent: string): string {
 function fromSlashComment(line: string, width: number): string {
 	const indent = getIndent(line);
 
-	const content = line
-		.trim()
-		.replace(/^\/\/\s?/, '');
+	const content = line.replace(/^(\s*)\/\/\s?/gm, '$1').trim();
 
 	const wrapped = (() => {
 		const singleLineWrapped = wrapSmart(content, width - indent.length - "/**  */".length);
