@@ -29,8 +29,23 @@
       "properties": {
         "cpp-comments-toggler.wrapWidth": {
           "type": "number",
-          "default": 80,
+          "default": 120,
           "description": "Maximum line width for multiline C++ comments"
+        },
+        "cpp-comments-toggler.consumeSlashes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to consume any amount of slashes in block comments from slashes."
+        },
+        "cpp-comments-toggler.searchClangColumnLimit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to try to find ColumtLimit in ${workspaceFolders}[0]/.clang-format and use for multiline comment blocks."
+        },
+        "cpp-comments-toggler.useRulerAsWidth": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to try to get editor.rulers[0] width and use for multiline comment blocks."
         }
       }
     }

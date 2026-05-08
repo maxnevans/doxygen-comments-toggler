@@ -13,7 +13,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const rulers = vscode.workspace.getConfiguration('editor').get<number[]>('rulers');
 			const config = vscode.workspace.getConfiguration('cpp-comments-toggler');
-			const width = getClangColumnLimit() || rulers?.[0] || config.get<number>('wrapWidth') || 80;
+			const searchClangLimit = config.get<boolean>('searchClangColumnLimit');
+			const useRulers = config.get<boolean>('useRulerAsWidth');
+			const width = searchClangLimit && getClangColumnLimit() || useRulers && rulers?.[0] || config.get<number>('wrapWidth') || 80;
 
 			const block = findCommentBlock(doc, pos.line);
 
@@ -35,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 			else if (block.type == BlockType.Slashes)
 			{
 				const text = doc.getText(block.range);
-				const newText = fromSlashComment(text, width);
+				const newText = fromSlashComment(text, width, config.get<boolean>('consumeSlashes') ?? false);
 				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 			}
 		})
@@ -159,10 +161,10 @@ function toMultiline(text: string, width: number, indent: string): string {
 	return result;
 }
 
-function fromSlashComment(line: string, width: number): string {
+function fromSlashComment(line: string, width: number, consumeAllSlashesAtLineStart: boolean): string {
 	const indent = getIndent(line);
-
-	const content = line.replace(/^(\s*)\/\/\s?/gm, '$1').trim();
+	const slashesAmountToConsume = consumeAllSlashesAtLineStart ? "{2,}" : "{2}";
+	const content = line.replace(new RegExp(`^(\s*)\/${slashesAmountToConsume}\s?`, "gm"), '$1').trim();
 
 	const wrapped = (() => {
 		const singleLineWrapped = wrapSmart(content, width - indent.length - "/**  */".length);
