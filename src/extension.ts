@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
 					newText = toMultiline(text, width, block.indent);
 				}
 
-				applyEditWithAST(editor, block.range, text, newText, editor.selection.active);
+				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 				return;
 			}
 
@@ -35,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const line = doc.lineAt(pos.line);
 			if (line.text.trim().startsWith('//')) {
 				const newText = fromSlashComment(line.text, width);
-				applyEditWithAST(editor, line.range, line.text, newText, editor.selection.active);
+				applyEditWithAst(editor, line.range, line.text, newText, editor.selection.active);
 			}
 		})
 	);
@@ -64,7 +64,6 @@ function findCommentBlock(doc: vscode.TextDocument, line: number) {
 	while (start >= 0) {
 		const text = doc.lineAt(start).text;
 		if (text.includes('/**')) break;
-		if (text.includes('*/')) return null;
 		start--;
 	}
 
@@ -181,130 +180,165 @@ function wrapSmart(text: string, maxWidth: number): string[] {
 	return lines;
 }
 
-type Token = {
-    text: string;
-    start: number;
-    end: number;
+export type Change = {
+	offset: number;
+	size: number;
 };
 
-function tokenize(content: string): Token[] {
-    const tokens: Token[] = [];
-    const regex = /\w+|[^\s\w]/g;
+export type DiffResult = {
+	removed: Change[];
+	inserted: Change[];
+};
 
-    let match: RegExpExecArray | null;
+export function diffSubstrings(original: string, result: string): DiffResult {
+	const m = original.length;
+	const n = result.length;
 
-    while ((match = regex.exec(content)) !== null) {
-        tokens.push({
-            text: match[0],
-            start: match.index,
-            end: match.index + match[0].length
-        });
-    }
+	// LCS table
+	const dp: number[][] = Array.from({ length: m + 1 }, () =>
+		Array(n + 1).fill(0)
+	);
 
-    return tokens;
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			if (original[i - 1] === result[j - 1]) {
+				dp[i][j] = dp[i - 1][j - 1] + 1;
+			} else {
+				dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+			}
+		}
+	}
+
+	const removed: Change[] = [];
+	const inserted: Change[] = [];
+
+	let i = m;
+	let j = n;
+
+	let remStart = -1;
+	let remEnd = -1;
+
+	let insStart = -1;
+	let insEnd = -1;
+
+	const flushRemoval = () => {
+		if (remStart !== -1) {
+			removed.push({
+				offset: remStart,
+				size: remEnd - remStart + 1,
+			});
+
+			remStart = -1;
+			remEnd = -1;
+		}
+	};
+
+	const flushInsert = () => {
+		if (insStart !== -1) {
+			inserted.push({
+				offset: insStart,
+				size: insEnd - insStart + 1,
+			});
+
+			insStart = -1;
+			insEnd = -1;
+		}
+	};
+
+	while (i > 0 || j > 0) {
+		if (
+			i > 0 &&
+			j > 0 &&
+			original[i - 1] === result[j - 1]
+		) {
+			flushRemoval();
+			flushInsert();
+
+			i--;
+			j--;
+		} else if (
+			j > 0 &&
+			(i === 0 || dp[i][j - 1] >= dp[i - 1][j])
+		) {
+			// insertion into result
+			flushRemoval();
+
+			if (insStart === -1) {
+				insStart = j - 1;
+				insEnd = j - 1;
+			} else {
+				insStart = j - 1;
+			}
+
+			j--;
+		} else {
+			// removal from original
+			flushInsert();
+
+			if (remStart === -1) {
+				remStart = i - 1;
+				remEnd = i - 1;
+			} else {
+				remStart = i - 1;
+			}
+
+			i--;
+		}
+	}
+
+	flushRemoval();
+	flushInsert();
+
+	removed.reverse();
+	inserted.reverse();
+
+	return { removed, inserted };
 }
 
-function findTokenAtOffset(tokens: Token[], offset: number) {
-    for (let i = 0; i < tokens.length; i++) {
-        if (offset >= tokens[i].start && offset <= tokens[i].end) {
-            return {
-                tokenIndex: i,
-                innerOffset: offset - tokens[i].start
-            };
-        }
-    }
-
-    return {
-        tokenIndex: tokens.length - 1,
-        innerOffset: 0
-    };
+export function remapOffsetFromChanges(diff: DiffResult, offset: number): number {
+	let newOffset = offset;
+	for (let i = 0; i < diff.removed.length; i++) {
+		const removal = diff.removed[i];
+		if (removal.offset < offset) {
+			newOffset -= Math.min(removal.size, offset - removal.offset);
+		}
+		else {
+			break;
+		}
+	}
+	for (let j = 0; j < diff.inserted.length; j++) {
+		const insertion = diff.inserted[j];
+		if (insertion.offset <= newOffset) {
+			newOffset += insertion.size;
+		}
+		else {
+			break;
+		}
+	}
+	return newOffset;
 }
 
-function restoreOffsetFromToken(
-    tokens: Token[],
-    mapping: { tokenIndex: number; innerOffset: number }
+function applyEditWithAst(
+	editor: vscode.TextEditor,
+	range: vscode.Range,
+	oldText: string,
+	newText: string,
+	originalCursor: vscode.Position
 ) {
-    if (tokens.length === 0) return 0;
+	const doc = editor.document;
 
-    const token = tokens[Math.min(mapping.tokenIndex, tokens.length - 1)];
+	const startOffset = doc.offsetAt(range.start);
+	const cursorOffset = doc.offsetAt(originalCursor);
+	const relativeOffset = Math.max(0, cursorOffset, startOffset);
 
-    return token.start + Math.min(mapping.innerOffset, token.text.length);
-}
+	const removals = diffSubstrings(oldText, newText);
+	const newRelativeOffset = remapOffsetFromChanges(removals, relativeOffset);
+	const newCursorOffset = doc.offsetAt(range.start) + newRelativeOffset;
 
-function extractCommentContent(text: string): string {
-    return text
-        .replace(/\/\*\*?/g, '')
-        .replace(/\*\//g, '')
-        .replace(/^\s*\*\s?/gm, '')
-        .replace(/^\/\/\s?/gm, '')
-        .trim();
-}
-
-function findContentStart(text: string): number {
-    const lines = text.split('\n');
-
-    let offset = 0;
-
-    for (const line of lines) {
-        const starMatch = line.match(/^\s*\*\s?/);
-        if (starMatch) {
-            return offset + starMatch[0].length;
-        }
-
-        if (line.includes('/**')) {
-            offset += line.length + 1;
-            continue;
-        }
-
-        return offset;
-    }
-
-    return 0;
-}
-
-function applyEditWithAST(
-    editor: vscode.TextEditor,
-    range: vscode.Range,
-    oldText: string,
-    newText: string,
-    originalCursor: vscode.Position
-) {
-    const doc = editor.document;
-
-    const startOffset = doc.offsetAt(range.start);
-    const cursorOffset = doc.offsetAt(originalCursor);
-
-    // 1. Extract content
-    const oldContent = extractCommentContent(oldText);
-
-    const contentStartOld = findContentStart(oldText);
-    const relativeContentOffset = Math.max(0, cursorOffset - startOffset - contentStartOld);
-
-    // 2. Tokenize
-    const oldTokens = tokenize(oldContent);
-	console.log(oldTokens);
-
-    const tokenMapping = findTokenAtOffset(oldTokens, relativeContentOffset);
-
-    // 3. Apply edit
-    editor.edit(edit => {
-        edit.replace(range, newText);
-    }).then(() => {
-
-        const newContent = extractCommentContent(newText);
-        const newTokens = tokenize(newContent);
-
-        const newContentOffset = restoreOffsetFromToken(newTokens, tokenMapping);
-
-        const contentStartNew = findContentStart(newText);
-
-        const finalOffset =
-            editor.document.offsetAt(range.start) +
-            contentStartNew +
-            newContentOffset;
-
-        const finalPos = editor.document.positionAt(finalOffset);
-
-        editor.selection = new vscode.Selection(finalPos, finalPos);
-    });
+	editor.edit(edit => {
+		edit.replace(range, newText);
+	}).then(() => {
+		const finalPos = editor.document.positionAt(newCursorOffset);
+		editor.selection = new vscode.Selection(finalPos, finalPos);
+	});
 }
