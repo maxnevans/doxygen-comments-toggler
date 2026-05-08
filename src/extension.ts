@@ -4,7 +4,7 @@ import * as path from 'path';
 
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('cpp-comments-toggler.toggleComment', () => {
+		vscode.commands.registerCommand('doxygen-comments-toggler.toggleComment', () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) return;
 
@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const pos = editor.selection.active;
 
 			const rulers = vscode.workspace.getConfiguration('editor').get<number[]>('rulers');
-			const config = vscode.workspace.getConfiguration('cpp-comments-toggler');
+			const config = vscode.workspace.getConfiguration('doxygen-comments-toggler');
 			const searchClangLimit = config.get<boolean>('searchClangColumnLimit');
 			const useRulers = config.get<boolean>('useRulerAsWidth');
 			const width = searchClangLimit && getClangColumnLimit() || useRulers && rulers?.[0] || config.get<number>('wrapWidth') || 80;
