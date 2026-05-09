@@ -34,8 +34,7 @@ export function activate(context: vscode.ExtensionContext) {
 				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 				return;
 			}
-			else if (block.type == BlockType.Slashes)
-			{
+			else if (block.type == BlockType.Slashes) {
 				const text = doc.getText(block.range);
 				const newText = fromSlashComment(text, width, config.get<boolean>('consumeSlashes') ?? false);
 				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
@@ -67,28 +66,31 @@ enum BlockType {
 function findCommentBlock(doc: vscode.TextDocument, line: number) {
 	let start = line;
 	let end = line;
-	let blockType: BlockType | null  = null;
+	let blockType: BlockType | null = null;
 
 	// find /**
 	while (start >= 0) {
 		const text = doc.lineAt(start).text;
-		if (blockType == null && text.includes('/**')) {
-			blockType = BlockType.Stars; 
-			break;
-		}
-		if (blockType == null && text.includes('*/'))
-		{
-			break;
-		}
-		if (text.trimStart().startsWith('//'))
-		{
+
+		if (text.trimStart().startsWith('//')) {
 			if (blockType == null) {
 				blockType = BlockType.Slashes;
 			}
+			else if (blockType == BlockType.Stars)
+			{
+				blockType = null;
+				break;
+			}
 		}
-		else if (blockType == BlockType.Slashes)
-		{
+		else if (blockType == BlockType.Slashes) {
 			break;
+		}
+		if ((blockType == null || blockType == BlockType.Stars) && text.includes('/**')) {
+			blockType = BlockType.Stars;
+			break;
+		}
+		if (blockType == null && text.includes('*/')) {
+			blockType = BlockType.Stars;
 		}
 		start--;
 	}
@@ -99,13 +101,11 @@ function findCommentBlock(doc: vscode.TextDocument, line: number) {
 	// find */
 	while (end < doc.lineCount) {
 		const text = doc.lineAt(end).text;
-	
-		if (blockType == BlockType.Slashes)
-		{
+
+		if (blockType == BlockType.Slashes) {
 			if (!text.trimStart().startsWith('//')) break;
 		}
-		else if (blockType == BlockType.Stars)
-		{
+		else if (blockType == BlockType.Stars) {
 			if (text.includes('*/')) break;
 		}
 
@@ -164,7 +164,7 @@ function toMultiline(text: string, width: number, indent: string): string {
 function fromSlashComment(line: string, width: number, consumeAllSlashesAtLineStart: boolean): string {
 	const indent = getIndent(line);
 	const slashesAmountToConsume = consumeAllSlashesAtLineStart ? "{2,}" : "{2}";
-	const content = line.replace(new RegExp(`^(\s*)\/${slashesAmountToConsume}\s?`, "gm"), '$1').trim();
+	const content = line.replace(new RegExp(`^(\\s*)\/${slashesAmountToConsume}\\s?`, "gm"), "$1").trim();
 
 	const wrapped = (() => {
 		const singleLineWrapped = wrapSmart(content, width - indent.length - "/**  */".length);
@@ -204,7 +204,7 @@ function wrapSmart(text: string, maxWidth: number): string[] {
 			current = next;
 		}
 
-		// prefer breaking after sentence endings
+		/** prefer breaking after sentence endings */
 		if (/[.!?]$/.test(word) && current.length > maxWidth * 0.6) {
 			lines.push(current);
 			current = '';
@@ -230,7 +230,7 @@ export function diffSubstrings(original: string, result: string): DiffResult {
 	const m = original.length;
 	const n = result.length;
 
-	// LCS table
+	/** LCS table */
 	const dp: number[][] = Array.from({ length: m + 1 }, () =>
 		Array(n + 1).fill(0)
 	);
@@ -296,7 +296,7 @@ export function diffSubstrings(original: string, result: string): DiffResult {
 			j > 0 &&
 			(i === 0 || dp[i][j - 1] >= dp[i - 1][j])
 		) {
-			// insertion into result
+			/** insertion into result */
 			flushRemoval();
 
 			if (insStart === -1) {
@@ -308,7 +308,7 @@ export function diffSubstrings(original: string, result: string): DiffResult {
 
 			j--;
 		} else {
-			// removal from original
+			/** removal from original */
 			flushInsert();
 
 			if (remStart === -1) {
