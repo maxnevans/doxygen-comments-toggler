@@ -14,7 +14,7 @@
     "commands": [
       {
         "command": "doxygen-comments-toggler.toggleComment",
-        "title": "Toggle C++ Comment"
+        "title": "Toggle Doxygen Comment"
       }
     ],
     "keybindings": [
