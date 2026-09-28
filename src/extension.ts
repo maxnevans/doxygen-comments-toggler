@@ -6,7 +6,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('doxygen-comments-toggler.toggleComment', () => {
 			const editor = vscode.window.activeTextEditor;
-			if (!editor) return;
+			if (!editor) {
+				return;
+			}
 
 			const doc = editor.document;
 			const pos = editor.selection.active;
@@ -19,9 +21,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const block = findCommentBlock(doc, pos.line);
 
-			if (!block) return;
+			if (!block) {
+				return;
+			}
 
-			if (block.type == BlockType.Stars) {
+			if (block.type === BlockType.Stars) {
 				const text = doc.getText(block.range);
 
 				let newText: string;
@@ -34,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
 				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 				return;
 			}
-			else if (block.type == BlockType.Slashes) {
+			else if (block.type === BlockType.Slashes) {
 				const text = doc.getText(block.range);
 				const newText = fromSlashComment(text, width, config.get<boolean>('consumeSlashes') ?? false);
 				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
@@ -46,11 +50,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 function getClangColumnLimit(): number | null {
 	const workspace = vscode.workspace.workspaceFolders?.[0];
-	if (!workspace) return null;
+	if (!workspace) {
+		return null;
+	}
 
 	const filePath = path.join(workspace.uri.fsPath, '.clang-format');
 
-	if (!fs.existsSync(filePath)) return null;
+	if (!fs.existsSync(filePath)) {
+		return null;
+	}
 
 	const content = fs.readFileSync(filePath, 'utf8');
 
@@ -73,47 +81,59 @@ function findCommentBlock(doc: vscode.TextDocument, line: number) {
 		const text = doc.lineAt(start).text;
 
 		if (text.trimStart().startsWith('//')) {
-			if (blockType == null) {
+			if (blockType === null) {
 				blockType = BlockType.Slashes;
 			}
-			else if (blockType == BlockType.Stars)
+			else if (blockType === BlockType.Stars)
 			{
 				blockType = null;
 				break;
 			}
 		}
-		else if (blockType == BlockType.Slashes) {
+		else if (blockType === BlockType.Slashes) {
 			break;
 		}
-		if ((blockType == null || blockType == BlockType.Stars) && text.includes('/**')) {
+		if ((blockType === null || blockType === BlockType.Stars) && text.includes('/**')) {
 			blockType = BlockType.Stars;
 			break;
 		}
-		if (blockType == null && text.includes('*/')) {
+		if (blockType === null && text.includes('*/')) {
 			blockType = BlockType.Stars;
 		}
 		start--;
 	}
-	if (blockType == BlockType.Slashes) start++;
+	if (blockType === BlockType.Slashes) {
+		start++;
+	}
 
-	if (blockType == null || start < 0) return null;
+	if (blockType === null || start < 0) {
+		return null;
+	}
 
 	// find */
 	while (end < doc.lineCount) {
 		const text = doc.lineAt(end).text;
 
-		if (blockType == BlockType.Slashes) {
-			if (!text.trimStart().startsWith('//')) break;
+		if (blockType === BlockType.Slashes) {
+			if (!text.trimStart().startsWith('//')) {
+				break;
+			}
 		}
-		else if (blockType == BlockType.Stars) {
-			if (text.includes('*/')) break;
+		else if (blockType === BlockType.Stars) {
+			if (text.includes('*/')) {
+				break;
+			}
 		}
 
 		end++;
 	}
-	if (blockType == BlockType.Slashes) end--;
+	if (blockType === BlockType.Slashes) {
+		end--;
+	}
 
-	if (end >= doc.lineCount) return null;
+	if (end >= doc.lineCount) {
+		return null;
+	}
 
 	const startLine = doc.lineAt(start).text;
 	return {
@@ -174,7 +194,9 @@ function fromSlashComment(line: string, width: number, consumeAllSlashesAtLineSt
 		return wrapSmart(content, width - indent.length - " * ".length);
 	})();
 
-	if (wrapped.length <= 1) return `${indent}/** ${wrapped[0]} */`;
+	if (wrapped.length <= 1) {
+		return `${indent}/** ${wrapped[0]} */`;
+	}
 
 	let result = `${indent}/**\n`;
 
@@ -197,7 +219,9 @@ function wrapSmart(text: string, maxWidth: number): string[] {
 		const next = current ? current + ' ' + word : word;
 
 		if (next.length > maxWidth) {
-			if (current) lines.push(current);
+			if (current) {
+				lines.push(current);
+			}
 
 			current = word;
 		} else {
@@ -211,7 +235,9 @@ function wrapSmart(text: string, maxWidth: number): string[] {
 		}
 	}
 
-	if (current) lines.push(current);
+	if (current) {
+		lines.push(current);
+	}
 
 	return lines;
 }
