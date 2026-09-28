@@ -1,0 +1,78 @@
+name: Publish to Visual Studio Marketplace
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: marketplace-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          const tag = process.env.RELEASE_TAG;
+
+          if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+            throw new Error(`Release tag '${tag}' is not a stable vX.Y.Z version.`);
+          }
+
+          if (tag !== `v${pkg.version}`) {
+            throw new Error(`Release tag '${tag}' does not match package version '${pkg.version}'.`);
+          }
+
+          const root = lock.packages?.[''];
+          if (lock.name !== pkg.name || root?.name !== pkg.name) {
+            throw new Error('package-lock.json does not match the package name.');
+          }
+
+          if (lock.version !== pkg.version || root?.version !== pkg.version) {
+            throw new Error('package-lock.json does not match the package version.');
+          }
+          NODE
+
+      - name: Verify release branch
+        run: |
+          git fetch --no-tags origin development:refs/remotes/origin/development
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/development || {
+            echo "Release tag must point to a commit on development." >&2
+            exit 1
+          }
+
+      - name: Test extension
+        run: xvfb-run -a npm test
+
+      - name: Package extension
+        run: npm run package -- --out extension.vsix
+
+      - name: Publish extension
+        run: npm run publish:marketplace -- --packagePath extension.vsix

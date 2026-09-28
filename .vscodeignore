@@ -1,6 +1,10 @@
 .vscode/**
+.github/**
 .vscode-test/**
+.pnpm-store/**
+scripts/**
 src/**
+out/test/**
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md
