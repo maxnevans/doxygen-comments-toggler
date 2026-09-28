@@ -60,7 +60,7 @@
     "preversion": "node scripts/verify-release.mjs && npm test",
     "postversion": "git push --atomic --follow-tags origin development",
     "package": "vsce package",
-    "publish:marketplace": "vsce publish --oidc"
+    "publish:marketplace": "vsce publish --azure-credential"
   },
   "devDependencies": {
     "@vscode/vsce": "4.0.0",
