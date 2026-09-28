@@ -1,0 +1,50 @@
+name: Get Marketplace identity
+
+on:
+  workflow_dispatch:
+    inputs:
+      verify_access:
+        description: Verify Marketplace access after adding the member
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    environment: marketplace
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sign in through Entra
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Show Marketplace member ID
+        shell: bash
+        run: |
+          member_id="$(az rest \
+            --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query id \
+            --output tsv)"
+          echo "::notice title=Marketplace member ID::$member_id"
+
+      - name: Verify Marketplace access
+        if: ${{ inputs.verify_access }}
+        run: npx --no-install vsce verify-pat maxnevans --azure-credential
