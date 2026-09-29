@@ -116,7 +116,7 @@ Create a local `.vsix` package from WSL:
 npm run package
 ```
 
-Before a release, make sure the `development` branch is clean, up to date, and tracks `origin/development`. The version script verifies that branch, runs the tests, creates the version commit and tag, and pushes both:
+Before a release, make sure the `development` branch is clean, up to date, and tracks `origin/development`. The version command is the complete local release action: it verifies the branch, runs the tests, updates the package version, creates the version commit and `vX.Y.Z` tag, and pushes the commit and tag:
 
 ```bash
 git switch development
@@ -124,13 +124,9 @@ git pull --ff-only
 npm version patch
 ```
 
-Use `minor` or `major` instead of `patch` when appropriate. Once authenticated with the Visual Studio Marketplace from WSL, publish with:
+Use `minor` or `major` instead of `patch` when appropriate. The pushed tag automatically starts `.github/workflows/publish.yml` on GitHub Actions. That Ubuntu-based workflow installs Node.js, verifies that the tag and package versions match, confirms that the tagged commit belongs to `development`, runs the tests, builds the VSIX, authenticates with Azure, and publishes the extension to the Visual Studio Marketplace.
 
-```bash
-npm run publish:marketplace
-```
-
-The publish script uses VSCE's Azure credential flow. Complete any browser sign-in it requests, then verify the new version in the Marketplace.
+Do not run `npm run publish:marketplace` as part of the normal local release process. That script is invoked by the automated workflow after the release tag is pushed. Check the GitHub Actions run and the Marketplace listing to confirm that publication completed successfully.
 
 ## Project commands
 
@@ -141,5 +137,5 @@ The publish script uses VSCE's Azure credential flow. Complete any browser sign-
 | `npm run lint` | Check the TypeScript sources with ESLint. |
 | `npm test` | Compile, lint, and run the VS Code extension tests. |
 | `npm run package` | Build a VSIX package with VSCE. |
-| `npm run publish:marketplace` | Publish to the Visual Studio Marketplace. |
+| `npm run publish:marketplace` | CI-only Marketplace publishing command invoked by the tagged-release workflow. |
 
