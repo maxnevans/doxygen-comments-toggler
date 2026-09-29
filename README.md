@@ -1,8 +1,8 @@
-# Doxygen Comments Toggler
-
 <p align="center">
   <img src="images/icon.png" alt="Doxygen Comments Toggler icon" width="160">
 </p>
+
+# Doxygen Comments Toggler
 
 Turn compact documentation comments into readable Doxygen blocks—and back again—without leaving the keyboard.
 
@@ -75,26 +75,30 @@ A single-line Doxygen comment toggles to the wrapped Doxygen style, and running 
 
 Only the comment block containing the caret is rewritten. Adjacent code and separate comment blocks are left unchanged. After the edit, the extension maps the caret back to the corresponding position inside the transformed text, so it stays with the same part of the comment instead of jumping to the beginning or end.
 
+### Smart wrapping from formatter settings
+
+When it creates a multiline Doxygen comment, the extension tries to match the line width already used by the project. With `doxygen-comments-toggler.searchFormatterConfig` enabled, it starts in the active file's directory and walks upward one directory at a time, stopping after it checks the root of the workspace containing that file. The nearest applicable configuration wins, and configs for unrelated languages are ignored.
+
 The wrapping width is selected in this order:
 
-1. The nearest supported formatter or lint config between the active file and its workspace root, when enabled.
-2. The first value in `editor.rulers`, when enabled and present.
-3. `doxygen-comments-toggler.wrapWidth`.
-4. A fallback width of 80 columns.
+1. The nearest supported formatter or lint configuration for the active file's language.
+2. The first value in VS Code's `editor.rulers`, when `useRulerAsWidth` is enabled and a ruler is configured.
+3. `doxygen-comments-toggler.wrapWidth`, whose default is 120 columns.
+4. A final safety fallback of 80 columns if no valid setting is available.
 
-Config discovery is language-aware and supports these common width settings:
+The language-aware config search recognizes these popular formatter and lint ecosystems:
 
-| Ecosystem | Files and setting |
-| --- | --- |
-| C, C++, Objective-C, Java, JavaScript, TypeScript, C#, Proto | `.clang-format` or `_clang-format`: `ColumnLimit` |
-| Prettier | Prettier config files or `package.json`: `printWidth` |
-| ESLint | Flat/legacy ESLint config files or `package.json`: `max-len` (`code` or numeric form) |
-| Biome and Deno | `biome.json` / `biome.jsonc` or `deno.json` / `deno.jsonc`: `lineWidth` |
-| Python | `pyproject.toml` (Black or Ruff), `ruff.toml`, `.ruff.toml`, `setup.cfg`, or `.flake8`: `line-length` / `max-line-length` |
-| Rust | `rustfmt.toml` or `.rustfmt.toml`: `max_width` |
-| Ruby | `.rubocop.yml` or `.rubocop.yaml`: `Layout/LineLength` → `Max` |
-| Dart | `analysis_options.yaml` or `analysis_options.yml`: `formatter.page_width` |
-| Any language | Matching `.editorconfig` section: `max_line_length` |
+| Formatter or config | Active file languages | Files and width setting |
+| --- | --- | --- |
+| ClangFormat | C, C++, CUDA C++, Objective-C, Objective-C++, Java, JavaScript, TypeScript, C#, and Proto | `.clang-format` or `_clang-format`: `ColumnLimit` |
+| Prettier | JavaScript/React, TypeScript/React, JSON/JSONC, CSS, SCSS, Less, HTML, Vue, Svelte, YAML, Markdown/MDX, and GraphQL | Prettier config files or `package.json`: `printWidth` |
+| ESLint | JavaScript/React and TypeScript/React | Flat or legacy ESLint config files, or `package.json`: `max-len` (`code` or numeric form) |
+| Biome and Deno | The web and document languages listed for Prettier above | `biome.json` / `biome.jsonc` or `deno.json` / `deno.jsonc`: `lineWidth` |
+| Black, Ruff, and Flake8 | Python | `pyproject.toml`, `ruff.toml`, `.ruff.toml`, `setup.cfg`, or `.flake8`: `line-length` / `max-line-length` |
+| rustfmt | Rust | `rustfmt.toml` or `.rustfmt.toml`: `max_width` |
+| RuboCop | Ruby | `.rubocop.yml` or `.rubocop.yaml`: `Layout/LineLength` → `Max` |
+| Dart formatter | Dart | `analysis_options.yaml` or `analysis_options.yml`: `formatter.page_width` |
+| EditorConfig | Any language whose file matches a section | `.editorconfig`: `max_line_length` |
 
 JavaScript-based config files are read as text for a static numeric value; the extension never executes project config code.
 
