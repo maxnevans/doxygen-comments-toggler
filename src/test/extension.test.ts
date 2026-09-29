@@ -1,4 +1,7 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
@@ -213,5 +216,76 @@ suite('Extension Test Suite', () => {
 
 		assert.strictEqual(document.getText(), original);
 		assert.strictEqual(editor.selection.active.character, commentStart);
+	});
+
+	test('Reads the nearest clang-format ColumnLimit for C++', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		try {
+			const sourceDirectory = path.join(root, 'src');
+			fs.mkdirSync(sourceDirectory);
+			fs.writeFileSync(path.join(root, '.clang-format'), 'ColumnLimit: 100\n');
+			fs.writeFileSync(path.join(sourceDirectory, '.clang-format'), 'ColumnLimit: 88\n');
+			const documentPath = path.join(sourceDirectory, 'example.cpp');
+
+			assert.strictEqual(extension.findFormatterColumnLimit(documentPath, root, 'cpp'), 88);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test('Treats an explicit unlimited width as opting out of inherited config', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		try {
+			const sourceDirectory = path.join(root, 'src');
+			fs.mkdirSync(sourceDirectory);
+			fs.writeFileSync(path.join(root, '.clang-format'), 'ColumnLimit: 100\n');
+			fs.writeFileSync(path.join(sourceDirectory, '.clang-format'), 'ColumnLimit: 0\n');
+
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(sourceDirectory, 'example.cpp'), root, 'cpp'), null);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test('Reads Prettier and ESLint widths without executing config files', () => {
+		const prettierRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		const eslintRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		try {
+			fs.writeFileSync(path.join(prettierRoot, 'prettier.config.mjs'), 'export default { printWidth: 96 };\n');
+			fs.writeFileSync(path.join(eslintRoot, 'eslint.config.mjs'), "export default [{ rules: { 'max-len': ['error', { code: 110 }] } }];\n");
+
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(prettierRoot, 'app.ts'), prettierRoot, 'typescript'), 96);
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(eslintRoot, 'app.js'), eslintRoot, 'javascript'), 110);
+		} finally {
+			fs.rmSync(prettierRoot, { recursive: true, force: true });
+			fs.rmSync(eslintRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('Reads language-specific TOML formatter widths', () => {
+		const pythonRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		const rustRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		try {
+			fs.writeFileSync(path.join(pythonRoot, 'pyproject.toml'), '[tool.black]\nline-length = 99\n');
+			fs.writeFileSync(path.join(rustRoot, 'rustfmt.toml'), 'max_width = 101\n');
+
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(pythonRoot, 'app.py'), pythonRoot, 'python'), 99);
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(rustRoot, 'lib.rs'), rustRoot, 'rust'), 101);
+		} finally {
+			fs.rmSync(pythonRoot, { recursive: true, force: true });
+			fs.rmSync(rustRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('Applies matching EditorConfig sections', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doxygen-toggler-'));
+		try {
+			fs.writeFileSync(path.join(root, '.editorconfig'), '[*.{js,ts}]\nmax_line_length = 92\n[*.py]\nmax_line_length = 79\n');
+
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(root, 'app.ts'), root, 'typescript'), 92);
+			assert.strictEqual(extension.findFormatterColumnLimit(path.join(root, 'app.py'), root, 'python'), 79);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

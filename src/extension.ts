@@ -15,9 +15,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const rulers = vscode.workspace.getConfiguration('editor').get<number[]>('rulers');
 			const config = vscode.workspace.getConfiguration('doxygen-comments-toggler');
-			const searchClangLimit = config.get<boolean>('searchClangColumnLimit');
+			const searchFormatterLimit = config.get<boolean>('searchFormatterConfig') ?? true;
 			const useRulers = config.get<boolean>('useRulerAsWidth');
-			const width = searchClangLimit && getClangColumnLimit() || useRulers && rulers?.[0] || config.get<number>('wrapWidth') || 80;
+			const workspace = vscode.workspace.getWorkspaceFolder(doc.uri);
+			const formatterWidth = searchFormatterLimit && workspace && doc.uri.scheme === 'file'
+				? findFormatterColumnLimit(doc.uri.fsPath, workspace.uri.fsPath, doc.languageId)
+				: null;
+			const width = formatterWidth || useRulers && rulers?.[0] || config.get<number>('wrapWidth') || 80;
 
 			const block = findCommentBlock(doc, pos);
 
@@ -52,23 +56,243 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 }
 
+type FormatterConfig = {
+	name: string;
+	read: (content: string, configPath: string, documentPath: string) => number | null;
+};
 
-function getClangColumnLimit(): number | null {
-	const workspace = vscode.workspace.workspaceFolders?.[0];
-	if (!workspace) {
+const clangLanguages = new Set(['c', 'cpp', 'cuda-cpp', 'objective-c', 'objective-cpp', 'java', 'javascript', 'typescript', 'csharp', 'proto']);
+const prettierLanguages = new Set(['javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'json', 'jsonc', 'css', 'scss', 'less', 'html', 'vue', 'svelte', 'yaml', 'markdown', 'mdx', 'graphql']);
+const eslintLanguages = new Set(['javascript', 'javascriptreact', 'typescript', 'typescriptreact']);
+
+const readPattern = (pattern: RegExp) => (content: string): number | null => {
+	const match = content.match(pattern);
+	return toWidth(match?.[1]);
+};
+
+const readClangWidth = (content: string): number | null => {
+	const match = content.match(/^\s*ColumnLimit\s*:\s*(\d+)/m);
+	return match?.[1] === '0' ? 0 : toWidth(match?.[1]);
+};
+const readPrettierWidth = readPattern(/["']?printWidth["']?\s*[:=]\s*(\d+)/);
+const readBiomeWidth = readPattern(/["']?lineWidth["']?\s*:\s*(\d+)/);
+const readDenoWidth = readPattern(/["']?lineWidth["']?\s*:\s*(\d+)/);
+const readRustWidth = readPattern(/^\s*max_width\s*=\s*(\d+)/m);
+const readRuffWidth = readPattern(/^\s*line-length\s*=\s*(\d+)/m);
+const readFlake8Width = readPattern(/^\s*max-line-length\s*=\s*(\d+)/m);
+
+function toWidth(value: string | number | undefined): number | null {
+	const width = typeof value === 'number' ? value : Number.parseInt(value ?? '', 10);
+	return Number.isInteger(width) && width > 0 ? width : null;
+}
+
+function readEslintWidth(content: string): number | null {
+	const ruleIndex = content.search(/["']?max-len["']?\s*:/);
+	if (ruleIndex < 0) {
 		return null;
 	}
 
-	const filePath = path.join(workspace.uri.fsPath, '.clang-format');
-
-	if (!fs.existsSync(filePath)) {
-		return null;
+	const rule = content.slice(ruleIndex, ruleIndex + 600);
+	const code = rule.match(/["']?code["']?\s*:\s*(\d+)/);
+	if (code) {
+		return toWidth(code[1]);
 	}
 
-	const content = fs.readFileSync(filePath, 'utf8');
+	const arrayWidth = rule.match(/:\s*\[\s*(?:["'](?:error|warn)["']|[12])\s*,\s*(\d+)/);
+	return toWidth(arrayWidth?.[1]);
+}
 
-	const match = content.match(/ColumnLimit:\s*(\d+)/);
-	return match ? parseInt(match[1], 10) : null;
+function readPackageWidth(content: string): number | null {
+	try {
+		const packageJson = JSON.parse(content) as {
+			prettier?: { printWidth?: number };
+			eslintConfig?: { rules?: Record<string, unknown> };
+		};
+		const prettierWidth = toWidth(packageJson.prettier?.printWidth);
+		if (prettierWidth) {
+			return prettierWidth;
+		}
+
+		const maxLen = packageJson.eslintConfig?.rules?.['max-len'];
+		if (Array.isArray(maxLen)) {
+			const options = maxLen[1];
+			if (typeof options === 'number') {
+				return toWidth(options);
+			}
+			if (options && typeof options === 'object' && 'code' in options) {
+				return toWidth((options as { code?: number }).code);
+			}
+		}
+	} catch {
+		return null;
+	}
+	return null;
+}
+
+function readPyprojectWidth(content: string): number | null {
+	const sections = ['tool.black', 'tool.ruff', 'tool.ruff.format'];
+	for (const section of sections) {
+		const escaped = section.replaceAll('.', '\\.');
+		const match = content.match(new RegExp(`^\\s*\\[${escaped}\\]\\s*$([\\s\\S]*?)(?=^\\s*\\[|(?![\\s\\S]))`, 'm'));
+		const width = match && readRuffWidth(match[1]);
+		if (width) {
+			return width;
+		}
+	}
+	return null;
+}
+
+function readRubocopWidth(content: string): number | null {
+	const section = content.match(/^Layout\/LineLength\s*:\s*$([\s\S]*?)(?=^[^\s#][^:]*:\s*$|(?![\s\S]))/m);
+	return section ? readPattern(/^\s*Max\s*:\s*(\d+)/m)(section[1]) : null;
+}
+
+function readDartWidth(content: string): number | null {
+	const section = content.match(/^formatter\s*:\s*$([\s\S]*?)(?=^[^\s#][^:]*:\s*$|(?![\s\S]))/m);
+	return section ? readPattern(/^\s*page_width\s*:\s*(\d+)/m)(section[1]) : null;
+}
+
+function expandBraces(pattern: string): string[] {
+	const match = pattern.match(/\{([^{}]+)\}/);
+	if (!match || match.index === undefined) {
+		return [pattern];
+	}
+	return match[1].split(',').flatMap(part => expandBraces(
+		pattern.slice(0, match.index) + part + pattern.slice(match.index! + match[0].length)
+	));
+}
+
+function matchesEditorConfigPattern(pattern: string, relativePath: string): boolean {
+	const target = pattern.includes('/') ? relativePath.replaceAll('\\', '/') : path.basename(relativePath);
+	return expandBraces(pattern).some(expanded => {
+		let expression = '';
+		for (let i = 0; i < expanded.length; i++) {
+			const char = expanded[i];
+			if (char === '*' && expanded[i + 1] === '*') {
+				expression += '.*';
+				i++;
+			} else if (char === '*') {
+				expression += '[^/]*';
+			} else if (char === '?') {
+				expression += '[^/]';
+			} else {
+				expression += char.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+			}
+		}
+		return new RegExp(`^${expression}$`).test(target);
+	});
+}
+
+function readEditorConfigWidth(content: string, configPath: string, documentPath: string): number | null {
+	const relativePath = path.relative(path.dirname(configPath), documentPath).replaceAll('\\', '/');
+	let applies = true;
+	let width: number | null = null;
+	for (const rawLine of content.split(/\r?\n/)) {
+		const line = rawLine.trim();
+		if (!line || line.startsWith('#') || line.startsWith(';')) {
+			continue;
+		}
+		const section = line.match(/^\[(.+)]$/);
+		if (section) {
+			applies = matchesEditorConfigPattern(section[1], relativePath);
+			continue;
+		}
+		if (applies) {
+			const setting = line.match(/^max_line_length\s*=\s*(\d+|off)\s*$/i);
+			if (setting) {
+				width = setting[1].toLowerCase() === 'off' ? 0 : toWidth(setting[1]);
+			}
+		}
+	}
+	return width;
+}
+
+function config(name: string, read: FormatterConfig['read']): FormatterConfig {
+	return { name, read };
+}
+
+function formatterConfigs(languageId: string): FormatterConfig[] {
+	const configs: FormatterConfig[] = [];
+	if (clangLanguages.has(languageId)) {
+		configs.push(config('.clang-format', readClangWidth), config('_clang-format', readClangWidth));
+	}
+	if (languageId === 'python') {
+		configs.push(
+			config('pyproject.toml', readPyprojectWidth),
+			config('ruff.toml', readRuffWidth),
+			config('.ruff.toml', readRuffWidth),
+			config('setup.cfg', readFlake8Width),
+			config('.flake8', readFlake8Width)
+		);
+	}
+	if (languageId === 'rust') {
+		configs.push(config('rustfmt.toml', readRustWidth), config('.rustfmt.toml', readRustWidth));
+	}
+	if (languageId === 'ruby') {
+		configs.push(config('.rubocop.yml', readRubocopWidth), config('.rubocop.yaml', readRubocopWidth));
+	}
+	if (languageId === 'dart') {
+		configs.push(config('analysis_options.yaml', readDartWidth), config('analysis_options.yml', readDartWidth));
+	}
+	if (prettierLanguages.has(languageId)) {
+		configs.push(
+			config('biome.json', readBiomeWidth), config('biome.jsonc', readBiomeWidth),
+			config('deno.json', readDenoWidth), config('deno.jsonc', readDenoWidth),
+			...['.prettierrc', '.prettierrc.json', '.prettierrc.yaml', '.prettierrc.yml', '.prettierrc.js', '.prettierrc.cjs', '.prettierrc.mjs', 'prettier.config.js', 'prettier.config.cjs', 'prettier.config.mjs']
+				.map(name => config(name, readPrettierWidth))
+		);
+	}
+	if (eslintLanguages.has(languageId)) {
+		configs.push(
+			...['eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', '.eslintrc', '.eslintrc.json', '.eslintrc.yaml', '.eslintrc.yml', '.eslintrc.js', '.eslintrc.cjs']
+				.map(name => config(name, readEslintWidth)),
+			config('package.json', readPackageWidth)
+		);
+	} else if (prettierLanguages.has(languageId)) {
+		configs.push(config('package.json', readPackageWidth));
+	}
+	configs.push(config('.editorconfig', readEditorConfigWidth));
+	return configs;
+}
+
+export function findFormatterColumnLimit(documentPath: string, workspaceRoot: string, languageId: string): number | null {
+	const root = path.resolve(workspaceRoot);
+	let directory = path.resolve(path.dirname(documentPath));
+	const relativeToRoot = path.relative(root, directory);
+	if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+		directory = root;
+	}
+
+	const candidates = formatterConfigs(languageId);
+	while (true) {
+		for (const candidate of candidates) {
+			const configPath = path.join(directory, candidate.name);
+			try {
+				if (!fs.statSync(configPath).isFile()) {
+					continue;
+				}
+				const width = candidate.read(fs.readFileSync(configPath, 'utf8'), configPath, documentPath);
+				if (width === 0) {
+					return null;
+				}
+				if (width) {
+					return width;
+				}
+			} catch {
+				// Missing, unreadable, or malformed configs simply fall through to the next source.
+			}
+		}
+
+		if (path.relative(root, directory) === '') {
+			break;
+		}
+		const parent = path.dirname(directory);
+		if (parent === directory) {
+			break;
+		}
+		directory = parent;
+	}
+	return null;
 }
 
 enum BlockType {

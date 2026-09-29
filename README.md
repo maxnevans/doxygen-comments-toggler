@@ -8,15 +8,62 @@ Turn compact documentation comments into readable Doxygen blocks—and back agai
 
 ## What it does
 
-Place the cursor anywhere inside a supported comment and run **Toggle Doxygen Comment** (default shortcut: <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Ctrl</kbd>+<kbd>D</kbd>).
+Place the caret inside a supported comment and run **Toggle Doxygen Comment** (default shortcut: <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Ctrl</kbd>+<kbd>D</kbd>). The command handles these cases:
 
-A one-line Doxygen comment:
+### Trailing comments after code
+
+A `//` comment following code toggles directly to an inline Doxygen comment and back without changing the code before it:
+
+```cpp
+auto count = connections.size(); // Number of active connections.
+```
+
+```cpp
+auto count = connections.size(); /** Number of active connections. */
+```
+
+The caret must be inside the trailing comment, not in the code before it.
+
+### Standalone slash comments
+
+A `//` comment on its own line is promoted to a Doxygen comment:
+
+```cpp
+// Number of active connections.
+```
+
+```cpp
+/** Number of active connections. */
+```
+
+Once in Doxygen form, it toggles between the single-line and multiline layouts described below.
+
+### Consecutive `//` and `///` blocks
+
+A contiguous block whose lines begin with `//`, `///`, or more slashes is converted as one comment block. With the default `consumeSlashes` setting, all leading slashes are removed:
+
+```cpp
+// Opens the connection.
+/// Returns false when the endpoint is unavailable.
+// Leaves the existing connection unchanged on failure.
+```
+
+```cpp
+/**
+ * Opens the connection. Returns false when the endpoint is unavailable.
+ * Leaves the existing connection unchanged on failure.
+ */
+```
+
+Wrapping depends on the configured width, so a short slash-comment block may fit into a single-line `/** ... */` comment.
+
+### Single-line and multiline Doxygen comments
+
+A single-line Doxygen comment toggles to the wrapped Doxygen style, and running the command again collapses it:
 
 ```cpp
 /** Returns the number of active connections. */
 ```
-
-becomes a wrapped block:
 
 ```cpp
 /**
@@ -24,20 +71,40 @@ becomes a wrapped block:
  */
 ```
 
-Running the command again collapses the block. Consecutive `//`, `///`, or longer slash-comment lines can also be converted into a Doxygen comment. The extension keeps the cursor near the same text while it rewrites the comment.
+### Caret and block preservation
+
+Only the comment block containing the caret is rewritten. Adjacent code and separate comment blocks are left unchanged. After the edit, the extension maps the caret back to the corresponding position inside the transformed text, so it stays with the same part of the comment instead of jumping to the beginning or end.
 
 The wrapping width is selected in this order:
 
-1. `ColumnLimit` in the first workspace folder's `.clang-format`, when enabled and present.
+1. The nearest supported formatter or lint config between the active file and its workspace root, when enabled.
 2. The first value in `editor.rulers`, when enabled and present.
 3. `doxygen-comments-toggler.wrapWidth`.
 4. A fallback width of 80 columns.
 
+Config discovery is language-aware and supports these common width settings:
+
+| Ecosystem | Files and setting |
+| --- | --- |
+| C, C++, Objective-C, Java, JavaScript, TypeScript, C#, Proto | `.clang-format` or `_clang-format`: `ColumnLimit` |
+| Prettier | Prettier config files or `package.json`: `printWidth` |
+| ESLint | Flat/legacy ESLint config files or `package.json`: `max-len` (`code` or numeric form) |
+| Biome and Deno | `biome.json` / `biome.jsonc` or `deno.json` / `deno.jsonc`: `lineWidth` |
+| Python | `pyproject.toml` (Black or Ruff), `ruff.toml`, `.ruff.toml`, `setup.cfg`, or `.flake8`: `line-length` / `max-line-length` |
+| Rust | `rustfmt.toml` or `.rustfmt.toml`: `max_width` |
+| Ruby | `.rubocop.yml` or `.rubocop.yaml`: `Layout/LineLength` → `Max` |
+| Dart | `analysis_options.yaml` or `analysis_options.yml`: `formatter.page_width` |
+| Any language | Matching `.editorconfig` section: `max_line_length` |
+
+JavaScript-based config files are read as text for a static numeric value; the extension never executes project config code.
+
 ## Usage
 
-- Put the cursor inside a `/** ... */` block or a consecutive group of slash-comment lines.
+- Put the caret inside the specific `/** ... */`, standalone slash comment, consecutive slash-comment block, or trailing comment that you want to transform.
 - Press <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Ctrl</kbd>+<kbd>D</kbd>.
 - Alternatively, open the Command Palette and choose **Toggle Doxygen Comment**.
+
+The command acts only on the comment block under the caret; it does not toggle every comment in the file or selection.
 
 The shortcut can be changed from **Preferences: Open Keyboard Shortcuts** by searching for `Toggle Doxygen Comment`.
 
@@ -45,9 +112,9 @@ The shortcut can be changed from **Preferences: Open Keyboard Shortcuts** by sea
 
 | Setting | Default | Purpose |
 | --- | ---: | --- |
-| `doxygen-comments-toggler.wrapWidth` | `120` | Maximum width used when no enabled `.clang-format` limit or editor ruler is available. |
+| `doxygen-comments-toggler.wrapWidth` | `120` | Maximum width used when no supported formatter config or editor ruler is available. |
 | `doxygen-comments-toggler.consumeSlashes` | `true` | Removes all leading slashes from each slash-comment line instead of exactly two. |
-| `doxygen-comments-toggler.searchClangColumnLimit` | `true` | Reads `ColumnLimit` from `.clang-format` in the first workspace folder. |
+| `doxygen-comments-toggler.searchFormatterConfig` | `true` | Reads the nearest supported formatter or lint config for the active file. |
 | `doxygen-comments-toggler.useRulerAsWidth` | `true` | Uses the first configured `editor.rulers` value as the wrapping width. |
 
 ## WSL2-only development workflow

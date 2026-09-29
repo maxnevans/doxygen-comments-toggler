@@ -38,10 +38,10 @@
           "default": true,
           "description": "Whether to consume any amount of slashes in block comments from slashes."
         },
-        "doxygen-comments-toggler.searchClangColumnLimit": {
+        "doxygen-comments-toggler.searchFormatterConfig": {
           "type": "boolean",
           "default": true,
-          "description": "Whether to try to find ColumtLimit in ${workspaceFolders}[0]/.clang-format and use for multiline comment blocks."
+          "description": "Use the nearest supported formatter or lint configuration's line width for multiline comment blocks."
         },
         "doxygen-comments-toggler.useRulerAsWidth": {
           "type": "boolean",
