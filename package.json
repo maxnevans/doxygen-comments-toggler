@@ -57,7 +57,7 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test",
+    "test": "vscode-test --fail-zero",
     "preversion": "node scripts/verify-release.mjs && npm test",
     "postversion": "git push --atomic --follow-tags origin development",
     "package": "vsce package",
