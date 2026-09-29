@@ -190,4 +190,28 @@ suite('Extension Test Suite', () => {
 			editStartOffset + newText.indexOf('setup')
 		);
 	});
+
+	test('Toggle trailing slash comment without changing preceding code', async () => {
+		const original = '    "editor.fontLigatures": true, // \'0xProto\' supports ligatures in terms of compacting symbols closer, e.g. <|||';
+		const code = '    "editor.fontLigatures": true, ';
+		const blockComment = `${code}/** '0xProto' supports ligatures in terms of compacting symbols closer, e.g. <||| */`;
+		const document = await vscode.workspace.openTextDocument({
+			content: original,
+			language: 'jsonc'
+		});
+		const editor = await vscode.window.showTextDocument(document);
+		const commentStart = original.indexOf('//');
+		const cursor = new vscode.Position(0, commentStart);
+		editor.selection = new vscode.Selection(cursor, cursor);
+
+		await vscode.commands.executeCommand('doxygen-comments-toggler.toggleComment');
+
+		assert.strictEqual(document.getText(), blockComment);
+		assert.strictEqual(editor.selection.active.character, commentStart);
+
+		await vscode.commands.executeCommand('doxygen-comments-toggler.toggleComment');
+
+		assert.strictEqual(document.getText(), original);
+		assert.strictEqual(editor.selection.active.character, commentStart);
+	});
 });

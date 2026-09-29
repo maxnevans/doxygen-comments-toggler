@@ -4,7 +4,7 @@ import * as path from 'path';
 
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('doxygen-comments-toggler.toggleComment', () => {
+		vscode.commands.registerCommand('doxygen-comments-toggler.toggleComment', async () => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {
 				return;
@@ -19,7 +19,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const useRulers = config.get<boolean>('useRulerAsWidth');
 			const width = searchClangLimit && getClangColumnLimit() || useRulers && rulers?.[0] || config.get<number>('wrapWidth') || 80;
 
-			const block = findCommentBlock(doc, pos.line);
+			const block = findCommentBlock(doc, pos);
 
 			if (!block) {
 				return;
@@ -29,19 +29,24 @@ export function activate(context: vscode.ExtensionContext) {
 				const text = doc.getText(block.range);
 
 				let newText: string;
-				if (isMultilineBlock(text)) {
+				if (block.inline) {
+					newText = toInlineSlashComment(text);
+				} else if (isMultilineBlock(text)) {
 					newText = toSingleLine(text, block.indent);
 				} else {
 					newText = toMultiline(text, width, block.indent);
 				}
 
-				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
+				await applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 				return;
 			}
 			else if (block.type === BlockType.Slashes) {
 				const text = doc.getText(block.range);
-				const newText = fromSlashComment(text, width, config.get<boolean>('consumeSlashes') ?? false);
-				applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
+				const consumeSlashes = config.get<boolean>('consumeSlashes') ?? false;
+				const newText = block.inline
+					? fromInlineSlashComment(text, consumeSlashes)
+					: fromSlashComment(text, width, consumeSlashes);
+				await applyEditWithAst(editor, block.range, text, newText, editor.selection.active);
 			}
 		})
 	);
@@ -71,7 +76,66 @@ enum BlockType {
 	Stars
 }
 
-function findCommentBlock(doc: vscode.TextDocument, line: number) {
+function findInlineComment(text: string): { start: number; type: BlockType } | null {
+	let quote: string | null = null;
+	let escaped = false;
+
+	for (let i = 0; i < text.length - 1; i++) {
+		const char = text[i];
+
+		if (quote !== null) {
+			if (escaped) {
+				escaped = false;
+			} else if (char === '\\') {
+				escaped = true;
+			} else if (char === quote) {
+				quote = null;
+			}
+			continue;
+		}
+
+		if (char === '"' || char === "'" || char === '`') {
+			quote = char;
+			continue;
+		}
+
+		if (text.startsWith('//', i)) {
+			return { start: i, type: BlockType.Slashes };
+		}
+		if (text.startsWith('/**', i)) {
+			return { start: i, type: BlockType.Stars };
+		}
+	}
+
+	return null;
+}
+
+function findCommentBlock(doc: vscode.TextDocument, position: vscode.Position) {
+	const line = position.line;
+	const currentLine = doc.lineAt(line).text;
+	const inlineComment = findInlineComment(currentLine);
+
+	if (inlineComment && currentLine.slice(0, inlineComment.start).trim().length > 0) {
+		if (position.character < inlineComment.start) {
+			return null;
+		}
+
+		const end = inlineComment.type === BlockType.Stars
+			? currentLine.indexOf('*/', inlineComment.start + 3) + 2
+			: currentLine.length;
+
+		if (end < 2) {
+			return null;
+		}
+
+		return {
+			range: new vscode.Range(line, inlineComment.start, line, end),
+			indent: '',
+			type: inlineComment.type,
+			inline: true
+		};
+	}
+
 	let start = line;
 	let end = line;
 	let blockType: BlockType | null = null;
@@ -139,7 +203,8 @@ function findCommentBlock(doc: vscode.TextDocument, line: number) {
 	return {
 		range: new vscode.Range(start, 0, end, doc.lineAt(end).text.length),
 		indent: getIndent(startLine),
-		type: blockType
+		type: blockType,
+		inline: false
 	};
 }
 
@@ -207,6 +272,17 @@ function fromSlashComment(line: string, width: number, consumeAllSlashesAtLineSt
 	result += `${indent} */`;
 
 	return result;
+}
+
+function fromInlineSlashComment(text: string, consumeAllSlashesAtLineStart: boolean): string {
+	const slashesAmountToConsume = consumeAllSlashesAtLineStart ? '{2,}' : '{2}';
+	const content = text.replace(new RegExp(`^\/${slashesAmountToConsume}\\s?`), '').trim();
+	return content ? `/** ${content} */` : '/** */';
+}
+
+function toInlineSlashComment(text: string): string {
+	const content = text.replace(/^\/\*\*\s?/, '').replace(/\s?\*\/$/, '').trim();
+	return content ? `// ${content}` : '//';
 }
 
 function wrapSmart(text: string, maxWidth: number): string[] {
@@ -391,13 +467,13 @@ export function remapOffsetForEdit(
 	return editStartOffset + remapOffsetFromChanges(changes, relativeOffset);
 }
 
-function applyEditWithAst(
+async function applyEditWithAst(
 	editor: vscode.TextEditor,
 	range: vscode.Range,
 	oldText: string,
 	newText: string,
 	originalCursor: vscode.Position
-) {
+): Promise<void> {
 	const doc = editor.document;
 
 	const newCursorOffset = remapOffsetForEdit(
@@ -407,10 +483,13 @@ function applyEditWithAst(
 		doc.offsetAt(originalCursor)
 	);
 
-	editor.edit(edit => {
+	const applied = await editor.edit(edit => {
 		edit.replace(range, newText);
-	}).then(() => {
-		const finalPos = editor.document.positionAt(newCursorOffset);
-		editor.selection = new vscode.Selection(finalPos, finalPos);
 	});
+	if (!applied) {
+		return;
+	}
+
+	const finalPos = editor.document.positionAt(newCursorOffset);
+	editor.selection = new vscode.Selection(finalPos, finalPos);
 }
