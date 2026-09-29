@@ -170,4 +170,24 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(newOffsetRem, 6, "Removal.");
 		assert.strictEqual(newOffsetAdd, 4, "Addition.");
 	});
+
+	test('Preserve caret before setup when comment starts later in document', () => {
+		const prefix = '{\n\t"editor.fontSize": 16,\n\n';
+		const oldText = '    /** Important to setup Editor settings. */';
+		const newText = '    /**\n     * Important to setup Editor settings.\n     */';
+		const editStartOffset = prefix.length;
+		const originalOffset = editStartOffset + oldText.indexOf('setup');
+
+		const newOffset = extension.remapOffsetForEdit(
+			oldText,
+			newText,
+			editStartOffset,
+			originalOffset
+		);
+
+		assert.strictEqual(
+			newOffset,
+			editStartOffset + newText.indexOf('setup')
+		);
+	});
 });

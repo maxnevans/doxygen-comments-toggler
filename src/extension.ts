@@ -380,6 +380,17 @@ export function remapOffsetFromChanges(diff: DiffResult, offset: number): number
 	return newOffset;
 }
 
+export function remapOffsetForEdit(
+	oldText: string,
+	newText: string,
+	editStartOffset: number,
+	originalOffset: number
+): number {
+	const relativeOffset = Math.max(0, originalOffset - editStartOffset);
+	const changes = diffSubstrings(oldText, newText);
+	return editStartOffset + remapOffsetFromChanges(changes, relativeOffset);
+}
+
 function applyEditWithAst(
 	editor: vscode.TextEditor,
 	range: vscode.Range,
@@ -389,13 +400,12 @@ function applyEditWithAst(
 ) {
 	const doc = editor.document;
 
-	const startOffset = doc.offsetAt(range.start);
-	const cursorOffset = doc.offsetAt(originalCursor);
-	const relativeOffset = Math.max(0, cursorOffset, startOffset);
-
-	const removals = diffSubstrings(oldText, newText);
-	const newRelativeOffset = remapOffsetFromChanges(removals, relativeOffset);
-	const newCursorOffset = doc.offsetAt(range.start) + newRelativeOffset;
+	const newCursorOffset = remapOffsetForEdit(
+		oldText,
+		newText,
+		doc.offsetAt(range.start),
+		doc.offsetAt(originalCursor)
+	);
 
 	editor.edit(edit => {
 		edit.replace(range, newText);
