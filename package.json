@@ -3,7 +3,7 @@
   "displayName": "Doxygen Comments Toggler",
   "description": "Allows to toggle easily between single line and multiline comments with a shortcut.",
   "icon": "images/icon.png",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "engines": {
     "vscode": "^1.111.0"
   },
